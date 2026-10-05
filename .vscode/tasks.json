@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: watch",
+      "type": "npm",
+      "script": "watch",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "never",
+        "group": "copilotBridge"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": {
+        "owner": "esbuild",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^✘ \\[ERROR\\] (.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "\\[watch\\] build started",
+          "endsPattern": "\\[watch\\] build finished"
+        }
+      }
+    }
+  ]
+}

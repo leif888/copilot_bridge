@@ -1,0 +1,40 @@
+{
+  "name": "copilot-bridge",
+  "displayName": "Copilot Bridge",
+  "description": "Personal AI assistant backed by GitHub Copilot via the VS Code Language Model API.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.133.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilotBridge.ping",
+        "title": "Copilot Bridge: Ping model",
+        "category": "Copilot Bridge"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "build:prod": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "node esbuild.mjs --production"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.133.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0"
+  }
+}

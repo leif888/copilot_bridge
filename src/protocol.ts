@@ -19,9 +19,15 @@ export interface AgentErrorPayload {
   readonly message: string;
 }
 
-/** A finished message, as rendered in the panel. */
+/**
+ * A finished message, as rendered in the panel.
+ *
+ * `tool` is a one-line record of a tool call. It is part of the transcript
+ * rather than a transient decoration so that a re-resolved view replays the
+ * work the assistant did, not just its prose.
+ */
 export interface RenderedMessage {
-  readonly role: 'user' | 'assistant' | 'error';
+  readonly role: 'user' | 'assistant' | 'tool' | 'error';
   readonly text: string;
 }
 
@@ -34,10 +40,15 @@ export type AgentEvent =
       readonly t: 'toolStart';
       readonly requestId: string;
       readonly callId: string;
-      readonly name: string;
-      readonly input: unknown;
+      readonly label: string;
     }
-  | { readonly t: 'toolEnd'; readonly requestId: string; readonly callId: string; readonly ok: boolean }
+  | {
+      readonly t: 'toolEnd';
+      readonly requestId: string;
+      readonly callId: string;
+      readonly ok: boolean;
+      readonly summary: string;
+    }
   | { readonly t: 'error'; readonly requestId: string; readonly error: AgentErrorPayload }
   | { readonly t: 'done'; readonly requestId: string }
   /**

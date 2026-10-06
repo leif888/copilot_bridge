@@ -91,6 +91,41 @@ body {
   color: var(--vscode-errorForeground, inherit);
 }
 
+/* Tool activity: one compact line per call, kept out of the prose bubbles. */
+.tool {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 4px;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.tool-mark::before {
+  content: '○';
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
+.tool.running .tool-mark::before {
+  content: '◌';
+  color: var(--vscode-progressBar-background, inherit);
+}
+
+.tool.done .tool-mark::before {
+  content: '●';
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.tool.failed .tool-mark::before {
+  content: '●';
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.tool-text {
+  font-family: var(--vscode-editor-font-family, monospace);
+  word-break: break-word;
+}
+
 .composer {
   display: flex;
   flex-direction: column;

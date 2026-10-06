@@ -71,11 +71,13 @@ export function registerChatParticipant(
       const sink: AgentSink = {
         text: (delta) => flusher.push(delta),
         progress: (message) => stream.progress(message),
-        toolStart: () => {
-          /* wired up in M4 */
-        },
+        // `progress` is transient — each call replaces the last — so a running
+        // tool is all this surface can show. Recording the finished calls would
+        // mean interleaving markdown into the answer, which reads worse than
+        // the plain reply does.
+        toolStart: ({ label }) => stream.progress(label),
         toolEnd: () => {
-          /* wired up in M4 */
+          /* nothing to settle; the next progress or markdown chunk replaces it */
         },
         error: (err) => {
           log.appendLine(`[chat] model error ${err.code}: ${err.message}`);

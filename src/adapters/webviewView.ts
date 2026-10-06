@@ -35,6 +35,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private inflight: vscode.CancellationTokenSource | undefined;
   /** Render-side transcript, replayed whenever the view is re-resolved. */
   private rendered: RenderedMessage[] = [];
+  /** Labels of tool calls in flight, so `toolEnd` can complete the same line. */
+  private readonly toolLabels = new Map<string, string>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -108,6 +110,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       case 'reset':
         this.session.reset();
         this.rendered = [];
+        this.toolLabels.clear();
         break;
       case 'cancel':
         this.inflight?.cancel();
@@ -153,9 +156,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         this.post({ t: 'text', requestId, delta });
       },
       progress: (message) => this.post({ t: 'progress', requestId, message }),
-      toolStart: (callId, name, input) =>
-        this.post({ t: 'toolStart', requestId, callId, name, input }),
-      toolEnd: (callId, ok) => this.post({ t: 'toolEnd', requestId, callId, ok }),
+      toolStart: ({ callId, label }) => {
+        this.toolLabels.set(callId, label);
+        this.post({ t: 'toolStart', requestId, callId, label });
+      },
+      toolEnd: (callId, ok, summary) => {
+        // Recorded in the transcript as soon as it finishes, so a view that is
+        // hidden mid-turn and shown again still replays what was already done.
+        const label = this.toolLabels.get(callId) ?? 'tool';
+        this.toolLabels.delete(callId);
+        this.rendered.push({ role: 'tool', text: `${label} · ${summary}` });
+        this.post({ t: 'toolEnd', requestId, callId, ok, summary });
+      },
       error: (error) => {
         failureMessage = error.message;
         this.log.appendLine(`[panel] model error ${error.code}: ${error.message}`);

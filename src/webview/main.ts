@@ -14,11 +14,16 @@ function mustGet<T extends HTMLElement>(id: string): T {
 }
 
 const log = mustGet<HTMLElement>('log');
-const composer = mustGet<HTMLFormElement>('composer');
 const input = mustGet<HTMLTextAreaElement>('input');
 const sendButton = mustGet<HTMLButtonElement>('send');
 const cancelButton = mustGet<HTMLButtonElement>('cancel');
 const resetButton = mustGet<HTMLButtonElement>('reset');
+const statusEl = mustGet<HTMLElement>('status');
+
+// Visible proof that this script executed. If the header does not show "ready",
+// the bundle never ran and nothing else in this file can be trusted.
+statusEl.textContent = 'ready';
+statusEl.classList.add('ok');
 
 /** Render-side view model only; the extension host owns the real transcript. */
 let active: { requestId: string; body: HTMLElement; text: string } | undefined;
@@ -131,9 +136,8 @@ function handle(event: AgentEvent): void {
 
     case 'error': {
       if (active?.requestId === event.requestId) {
-        active.body.textContent = active.text.length > 0
-          ? `${active.text}\n\n${event.error.message}`
-          : event.error.message;
+        active.body.textContent =
+          active.text.length > 0 ? `${active.text}\n\n${event.error.message}` : event.error.message;
         active.body.closest('.msg')?.classList.add('msg-error');
       } else {
         addMessage('error', event.error.message);
@@ -160,12 +164,10 @@ function handle(event: AgentEvent): void {
   }
 }
 
-composer.addEventListener('submit', (e) => {
-  // Without this the webview would perform a native form submission and reload,
-  // wiping the panel.
-  e.preventDefault();
-  send();
-});
+// Deliberately not a <form>: a form would natively submit (and reload the whole
+// panel) if this script ever failed to run, destroying the conversation with no
+// way to recover. A div plus explicit handlers cannot do that.
+sendButton.addEventListener('click', () => send());
 
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {

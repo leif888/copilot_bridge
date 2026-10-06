@@ -44,6 +44,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.renderHtml(view.webview);
 
+    // If the webview bundle is missing from disk the panel silently degrades to
+    // static HTML, which looks like "nothing works". Check and say so.
+    void this.checkAssets();
+
     view.webview.onDidReceiveMessage((raw: unknown) => {
       if (!isWebviewToHost(raw)) {
         this.log.appendLine(`[panel] ignored unrecognized message: ${JSON.stringify(raw)}`);
@@ -57,6 +61,18 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.log.appendLine('[panel] view disposed (hidden or closed) — turn keeps running');
       this.view = undefined;
     });
+  }
+
+  private async checkAssets(): Promise<void> {
+    for (const name of ['webview.js', 'webview.css']) {
+      const uri = vscode.Uri.joinPath(this.context.extensionUri, 'dist', name);
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        this.log.appendLine(`[panel] asset ${name} present (${stat.size} bytes)`);
+      } catch {
+        this.log.appendLine(`[panel] ASSET MISSING: ${uri.fsPath} — the build did not run`);
+      }
+    }
   }
 
   private post(event: AgentEvent): void {
@@ -181,18 +197,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <header class="bar">
     <span class="title">Copilot Bridge</span>
+    <span id="status" class="status"></span>
     <button id="reset" class="ghost" type="button" title="Clear conversation">Clear</button>
   </header>
 
   <main id="log" class="log" aria-live="polite"></main>
 
-  <form id="composer" class="composer">
+  <div class="composer">
     <textarea id="input" rows="3" placeholder="Ask something...  (Enter to send, Shift+Enter for a new line)"></textarea>
     <div class="actions">
       <button id="cancel" class="ghost" type="button" hidden>Stop</button>
-      <button id="send" type="submit">Send</button>
+      <button id="send" type="button">Send</button>
     </div>
-  </form>
+  </div>
 
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

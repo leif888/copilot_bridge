@@ -33,6 +33,18 @@ body {
   opacity: 0.9;
 }
 
+/* Filled in by the webview script. Empty means the script never ran. */
+.status {
+  flex: 1;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.status.ok::before {
+  content: '● ';
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
 .log {
   flex: 1;
   overflow-y: auto;

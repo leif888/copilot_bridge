@@ -1,21 +1,20 @@
 /** Shared system prompt for both entry points. */
 export const SYSTEM_PROMPT = [
-  '你是 Copilot Bridge —— 一个运行在 VS Code 中的个人 AI 编程助手。',
+  'You are Copilot Bridge, a personal AI coding assistant running inside VS Code.',
   '',
-  '行为准则:',
-  '- 默认使用中文回答,除非用户使用其他语言提问。',
-  '- 你的知识范围仅限当前工作区。你没有外部知识库;需要工作区之外的信息时,直接说明你拿不到。',
-  '- 引用代码时给出 `相对路径:行号` 格式,便于跳转。',
-  '- 不确定的事情明确说"不确定",不要编造 API、文件路径或行号。',
-  '- 回答简洁,直接给结论;需要展开时用列表而非长段落。',
+  'Guidelines:',
+  '- Your knowledge is limited to the current workspace. You have no external knowledge base. When a question needs information from outside the workspace, say so plainly instead of guessing.',
+  '- When you reference code, cite it as `relative/path.ext:line` so it can be navigated.',
+  '- If you are unsure, say you are unsure. Never invent APIs, file paths, or line numbers.',
+  '- Be concise. Lead with the answer, and use lists rather than long paragraphs when expanding.',
 ].join('\n');
 
 /** Shown when `selectChatModels` yields nothing. */
 export const NO_MODEL_MESSAGE = [
-  '**找不到可用的 Copilot 模型。**',
+  '**No Copilot model is available.**',
   '',
-  '请确认:',
-  '1. 已登录 GitHub Copilot(命令面板 → `GitHub Copilot: Sign In`)',
-  '2. 账号已分配 Copilot 席位',
-  '3. 企业策略允许在此使用 Copilot',
+  'Check that:',
+  '1. You are signed in to GitHub Copilot (Command Palette -> `GitHub Copilot: Sign In`)',
+  '2. Your account has a Copilot seat assigned',
+  '3. Enterprise policy permits Copilot in this context',
 ].join('\n');

@@ -19,6 +19,12 @@ export interface AgentErrorPayload {
   readonly message: string;
 }
 
+/** A finished message, as rendered in the panel. */
+export interface RenderedMessage {
+  readonly role: 'user' | 'assistant' | 'error';
+  readonly text: string;
+}
+
 /** Extension host -> webview. */
 export type AgentEvent =
   | { readonly t: 'start'; readonly requestId: string }
@@ -33,7 +39,14 @@ export type AgentEvent =
     }
   | { readonly t: 'toolEnd'; readonly requestId: string; readonly callId: string; readonly ok: boolean }
   | { readonly t: 'error'; readonly requestId: string; readonly error: AgentErrorPayload }
-  | { readonly t: 'done'; readonly requestId: string };
+  | { readonly t: 'done'; readonly requestId: string }
+  /**
+   * Rebuild the panel from scratch. Sent on `ready`, which happens on first
+   * render *and* every time VS Code re-resolves the view — sidebar views are
+   * disposed whenever they are hidden, which would otherwise wipe the
+   * conversation.
+   */
+  | { readonly t: 'restore'; readonly messages: readonly RenderedMessage[] };
 
 /** Webview -> extension host. */
 export type WebviewToHost =

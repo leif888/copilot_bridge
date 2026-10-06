@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { runTurn } from '../core/agent';
-import { NO_MODEL_MESSAGE, SYSTEM_PROMPT } from '../core/prompt';
 import { resolveModel } from '../core/model';
+import { NO_MODEL_MESSAGE, SYSTEM_PROMPT } from '../core/prompt';
 import { Session } from '../core/session';
 import type { AgentSink } from './sink';
 
@@ -41,20 +41,28 @@ class MarkdownFlusher {
  * The handler runs in response to a user message, which is what satisfies the
  * Language Model API rule that `sendRequest` is only called from a user action.
  */
-export function registerChatParticipant(context: vscode.ExtensionContext): vscode.ChatParticipant {
+export function registerChatParticipant(
+  context: vscode.ExtensionContext,
+  log: vscode.OutputChannel,
+): vscode.ChatParticipant {
   // ChatRequest carries no conversation id, so we keep one rolling session and
   // treat "empty history" as the signal that the user started a new chat.
+  //
+  // Known limitation: two chat sessions open at once will share this transcript.
   let session = new Session(SYSTEM_PROMPT);
 
   const participant = vscode.chat.createChatParticipant(
     PARTICIPANT_ID,
     async (request, chatContext, stream, token) => {
+      log.appendLine(`[chat] @bridge <- ${request.prompt.slice(0, 80)}`);
+
       if (chatContext.history.length === 0) {
         session = new Session(SYSTEM_PROMPT);
       }
 
       const model = await resolveModel();
       if (!model) {
+        log.appendLine('[chat] no Copilot model available');
         stream.markdown(NO_MODEL_MESSAGE);
         return;
       }
@@ -70,8 +78,9 @@ export function registerChatParticipant(context: vscode.ExtensionContext): vscod
           /* wired up in M4 */
         },
         error: (err) => {
+          log.appendLine(`[chat] model error ${err.code}: ${err.message}`);
           flusher.flush();
-          stream.markdown(`\n\n**错误**(${err.code}):${err.message}`);
+          stream.markdown(`\n\n**Error** (${err.code}): ${err.message}`);
         },
         done: () => flusher.flush(),
       };

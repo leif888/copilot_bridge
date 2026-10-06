@@ -3,7 +3,12 @@ import { runTurn } from '../core/agent';
 import { resolveModel } from '../core/model';
 import { NO_MODEL_MESSAGE, SYSTEM_PROMPT } from '../core/prompt';
 import { Session } from '../core/session';
-import { isWebviewToHost, type AgentEvent, type WebviewToHost } from '../protocol';
+import {
+  isWebviewToHost,
+  type AgentEvent,
+  type RenderedMessage,
+  type WebviewToHost,
+} from '../protocol';
 import type { AgentSink } from './sink';
 
 export const VIEW_ID = 'copilotBridge.panel';
@@ -11,18 +16,27 @@ export const VIEW_ID = 'copilotBridge.panel';
 /**
  * Standalone assistant panel.
  *
- * The webview holds only a render-side view model; the authoritative transcript
- * lives here in `Session`. The webview never sends history back — it sends a
- * prompt and a request id — which keeps the two sides from drifting apart.
+ * Two VS Code behaviours shape this class:
+ *
+ * 1. A sidebar webview view is **disposed every time it is hidden**. So the
+ *    render transcript is kept here and replayed on `ready`, otherwise the
+ *    conversation would vanish whenever the user glances at another view.
+ * 2. Disposal must **not** cancel the in-flight turn, for the same reason.
  */
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private readonly session = new Session(SYSTEM_PROMPT);
   private inflight: vscode.CancellationTokenSource | undefined;
+  /** Render-side transcript, replayed whenever the view is re-resolved. */
+  private rendered: RenderedMessage[] = [];
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly log: vscode.OutputChannel,
+  ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.log.appendLine('[panel] view resolved');
     this.view = view;
     view.webview.options = {
       enableScripts: true,
@@ -31,29 +45,36 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.renderHtml(view.webview);
 
     view.webview.onDidReceiveMessage((raw: unknown) => {
-      if (isWebviewToHost(raw)) {
-        void this.handle(raw);
+      if (!isWebviewToHost(raw)) {
+        this.log.appendLine(`[panel] ignored unrecognized message: ${JSON.stringify(raw)}`);
+        return;
       }
+      this.log.appendLine(`[panel] <- ${raw.t}`);
+      void this.handle(raw);
     });
 
     view.onDidDispose(() => {
-      this.inflight?.cancel();
-      this.inflight?.dispose();
-      this.inflight = undefined;
+      this.log.appendLine('[panel] view disposed (hidden or closed) — turn keeps running');
       this.view = undefined;
     });
   }
 
   private post(event: AgentEvent): void {
-    void this.view?.webview.postMessage(event);
+    if (!this.view) {
+      // The view is hidden; `rendered` still holds the transcript for replay.
+      return;
+    }
+    void this.view.webview.postMessage(event);
   }
 
   private async handle(msg: WebviewToHost): Promise<void> {
     switch (msg.t) {
       case 'ready':
+        this.post({ t: 'restore', messages: this.rendered });
         break;
       case 'reset':
         this.session.reset();
+        this.rendered = [];
         break;
       case 'cancel':
         this.inflight?.cancel();
@@ -69,17 +90,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.post({
         t: 'error',
         requestId,
-        error: { code: 'Unknown', message: '上一个请求仍在进行中,请先取消。' },
+        error: { code: 'Unknown', message: 'A request is already in flight. Cancel it first.' },
       });
       this.post({ t: 'done', requestId });
       return;
     }
 
     this.post({ t: 'start', requestId });
+    this.rendered.push({ role: 'user', text: prompt });
 
     const model = await resolveModel();
     if (!model) {
+      this.log.appendLine('[panel] no Copilot model available');
       this.post({ t: 'error', requestId, error: { code: 'NotFound', message: NO_MODEL_MESSAGE } });
+      this.rendered.push({ role: 'error', text: NO_MODEL_MESSAGE });
       this.post({ t: 'done', requestId });
       return;
     }
@@ -87,21 +111,39 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const cts = new vscode.CancellationTokenSource();
     this.inflight = cts;
 
-    // The webview has no chat conversation, so the tool invocation token is
-    // meaningless here; built-in tools invoked later will run without an inline
-    // chip but still work and still confirm.
+    let accumulated = '';
+    let failureMessage: string | undefined;
+
     const sink: AgentSink = {
-      text: (delta) => this.post({ t: 'text', requestId, delta }),
+      text: (delta) => {
+        accumulated += delta;
+        this.post({ t: 'text', requestId, delta });
+      },
       progress: (message) => this.post({ t: 'progress', requestId, message }),
-      toolStart: (callId, name, input) => this.post({ t: 'toolStart', requestId, callId, name, input }),
+      toolStart: (callId, name, input) =>
+        this.post({ t: 'toolStart', requestId, callId, name, input }),
       toolEnd: (callId, ok) => this.post({ t: 'toolEnd', requestId, callId, ok }),
-      error: (error) => this.post({ t: 'error', requestId, error }),
+      error: (error) => {
+        failureMessage = error.message;
+        this.log.appendLine(`[panel] model error ${error.code}: ${error.message}`);
+        this.post({ t: 'error', requestId, error });
+      },
       done: () => this.post({ t: 'done', requestId }),
     };
 
     try {
       await runTurn({ model, session: this.session, prompt, sink, token: cts.token });
+    } catch (err) {
+      // runTurn handles model failures itself; reaching here means a bug in our code.
+      this.log.appendLine(`[panel] unexpected failure: ${String(err)}`);
+      this.post({ t: 'error', requestId, error: { code: 'Unknown', message: String(err) } });
+      this.post({ t: 'done', requestId });
     } finally {
+      if (failureMessage !== undefined) {
+        this.rendered.push({ role: 'error', text: failureMessage });
+      } else if (accumulated.length > 0) {
+        this.rendered.push({ role: 'assistant', text: accumulated });
+      }
       cts.dispose();
       if (this.inflight === cts) {
         this.inflight = undefined;
@@ -118,16 +160,17 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     );
 
-    // No remote origins: the panel renders model output, which is untrusted text.
+    // `default-src 'none'` plus an explicit allowlist: the panel renders model
+    // output, which is untrusted text and must never reach a remote origin.
     const csp = [
       "default-src 'none'",
       `style-src ${webview.cspSource}`,
-      `script-src 'nonce-${nonce}'`,
+      `script-src 'nonce-${nonce}' ${webview.cspSource}`,
       `font-src ${webview.cspSource}`,
     ].join('; ');
 
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -138,16 +181,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 <body>
   <header class="bar">
     <span class="title">Copilot Bridge</span>
-    <button id="reset" class="ghost" type="button" title="清空会话">清空</button>
+    <button id="reset" class="ghost" type="button" title="Clear conversation">Clear</button>
   </header>
 
   <main id="log" class="log" aria-live="polite"></main>
 
   <form id="composer" class="composer">
-    <textarea id="input" rows="3" placeholder="问点什么…(Enter 发送,Shift+Enter 换行)"></textarea>
+    <textarea id="input" rows="3" placeholder="Ask something...  (Enter to send, Shift+Enter for a new line)"></textarea>
     <div class="actions">
-      <button id="cancel" class="ghost" type="button" hidden>停止</button>
-      <button id="send" type="submit">发送</button>
+      <button id="cancel" class="ghost" type="button" hidden>Stop</button>
+      <button id="send" type="submit">Send</button>
     </div>
   </form>
 

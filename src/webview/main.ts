@@ -1,5 +1,5 @@
 import './styles.css';
-import type { AgentEvent, WebviewToHost } from '../protocol';
+import type { AgentEvent, RenderedMessage, WebviewToHost } from '../protocol';
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -24,17 +24,23 @@ const resetButton = mustGet<HTMLButtonElement>('reset');
 let active: { requestId: string; body: HTMLElement; text: string } | undefined;
 let requestCounter = 0;
 
+const ROLE_LABEL: Record<RenderedMessage['role'], string> = {
+  user: 'You',
+  assistant: 'Assistant',
+  error: 'Error',
+};
+
 function scrollToBottom(): void {
   log.scrollTop = log.scrollHeight;
 }
 
-function addMessage(role: 'user' | 'assistant' | 'error', text: string): HTMLElement {
+function addMessage(role: RenderedMessage['role'], text: string): HTMLElement {
   const wrap = document.createElement('article');
   wrap.className = `msg msg-${role}`;
 
   const label = document.createElement('div');
   label.className = 'msg-role';
-  label.textContent = role === 'user' ? '你' : role === 'assistant' ? '助手' : '错误';
+  label.textContent = ROLE_LABEL[role];
 
   const body = document.createElement('div');
   body.className = 'msg-body';
@@ -50,6 +56,13 @@ function setBusy(busy: boolean): void {
   sendButton.disabled = busy;
   cancelButton.hidden = !busy;
   input.disabled = busy;
+}
+
+/** End the current turn, whichever way it ended. Safe to call more than once. */
+function finishTurn(): void {
+  active = undefined;
+  setBusy(false);
+  input.focus();
 }
 
 function send(): void {
@@ -74,6 +87,17 @@ function handle(event: AgentEvent): void {
     case 'start':
       break;
 
+    case 'restore':
+      // The view was re-resolved (hidden then shown again). Rebuild from the
+      // host's transcript rather than trusting the DOM, which was destroyed.
+      log.replaceChildren();
+      active = undefined;
+      setBusy(false);
+      for (const message of event.messages) {
+        addMessage(message.role, message.text);
+      }
+      break;
+
     case 'text': {
       if (active?.requestId !== event.requestId) {
         return;
@@ -88,16 +112,16 @@ function handle(event: AgentEvent): void {
       if (active?.requestId !== event.requestId) {
         return;
       }
-      // Progress is transient: show it in place of the body until real text lands.
+      // Transient: replace the empty placeholder until real text arrives.
       if (active.text.length === 0) {
-        active.body.textContent = `_${event.message}_`;
+        active.body.textContent = event.message;
       }
       break;
     }
 
     case 'toolStart': {
       if (active?.requestId === event.requestId) {
-        active.body.textContent = `${active.text}\n[调用工具 ${event.name}…]`;
+        active.body.textContent = `${active.text}\n[running ${event.name}...]`;
       }
       break;
     }
@@ -106,29 +130,39 @@ function handle(event: AgentEvent): void {
       break;
 
     case 'error': {
-      const body = addMessage('error', event.error.message);
       if (active?.requestId === event.requestId) {
-        body.textContent = `${active.text}\n\n${event.error.message}`;
+        active.body.textContent = active.text.length > 0
+          ? `${active.text}\n\n${event.error.message}`
+          : event.error.message;
+        active.body.closest('.msg')?.classList.add('msg-error');
+      } else {
+        addMessage('error', event.error.message);
       }
+      // Matches the AgentSink contract: `error` is terminal, `done` will not
+      // follow. Reset the busy state here so the panel never gets stuck.
+      finishTurn();
       break;
     }
 
-    case 'done':
-      if (active?.requestId === event.requestId) {
-        if (active.text.length === 0) {
-          active.body.textContent = '(无输出)';
-        } else {
-          active.body.textContent = active.text;
-        }
-        active = undefined;
-        setBusy(false);
-        input.focus();
+    case 'done': {
+      if (active?.requestId !== event.requestId) {
+        return;
       }
+      if (active.text.length > 0) {
+        active.body.textContent = active.text;
+      } else {
+        // Nothing streamed and no error: say so rather than leaving a blank bubble.
+        active.body.textContent = '(no output)';
+      }
+      finishTurn();
       break;
+    }
   }
 }
 
 composer.addEventListener('submit', (e) => {
+  // Without this the webview would perform a native form submission and reload,
+  // wiping the panel.
   e.preventDefault();
   send();
 });

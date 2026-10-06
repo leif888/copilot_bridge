@@ -84,14 +84,14 @@ function asAgentErrorCode(code: string): AgentErrorCode {
 export function explainFailure(failure: ModelFailure): string {
   switch (failure.code) {
     case 'NoPermissions':
-      return '未获得使用 Copilot 模型的授权。请运行 "GitHub Copilot: Sign In" 后重试,或检查企业策略是否允许此模型。';
+      return 'Not authorized to use the Copilot model. Run "GitHub Copilot: Sign In" and retry, or check whether enterprise policy permits this model.';
     case 'Blocked':
-      return '请求被阻止 —— 通常是配额或速率限制。稍后重试,或检查 Copilot 订阅状态。';
+      return 'The request was blocked — usually a quota or rate limit. Retry later, or check your Copilot subscription.';
     case 'NotFound':
-      return '所选模型已不可用,可能需要重新选择模型。';
+      return 'The selected model is no longer available. Reselect a model and retry.';
     case 'Cancelled':
-      return '请求已取消。';
+      return 'Request cancelled.';
     default:
-      return `模型调用失败:${failure.message}`;
+      return `Model call failed: ${failure.message}`;
   }
 }

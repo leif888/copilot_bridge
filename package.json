@@ -18,7 +18,7 @@
     "commands": [
       {
         "command": "copilotBridge.open",
-        "title": "打开助手面板",
+        "title": "Open assistant panel",
         "category": "Copilot Bridge"
       },
       {
@@ -32,7 +32,7 @@
         "id": "copilotBridge.assistant",
         "name": "bridge",
         "fullName": "Copilot Bridge",
-        "description": "个人 AI 助手,由 GitHub Copilot 模型驱动",
+        "description": "Personal AI assistant driven by GitHub Copilot models",
         "isSticky": true
       }
     ],

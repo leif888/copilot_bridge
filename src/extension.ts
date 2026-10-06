@@ -12,24 +12,30 @@ import {
 const OUTPUT_CHANNEL_NAME = 'Copilot Bridge';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
-  context.subscriptions.push(output);
-  output.appendLine(`[activate] Copilot Bridge on VS Code ${vscode.version}`);
+  const log = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
+  context.subscriptions.push(log);
+  log.appendLine(`[activate] Copilot Bridge on VS Code ${vscode.version}`);
 
   registerModelTracking(context);
 
-  // Entry point 1: `@bridge` inside the existing Copilot Chat panel.
-  registerChatParticipant(context);
-
-  // Entry point 2: standalone sidebar panel.
-  const provider = new ChatWebviewProvider(context);
+  // Entry point 1: standalone sidebar panel (M2).
+  const provider = new ChatWebviewProvider(context, log);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(VIEW_ID, provider));
+
+  // Entry point 2: `@bridge` inside the existing Copilot Chat panel (M3).
+  // Registered defensively and *after* the panel: a problem with the chat API
+  // must not take the panel down with it.
+  try {
+    registerChatParticipant(context, log);
+  } catch (err) {
+    log.appendLine(`[activate] chat participant registration failed: ${String(err)}`);
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilotBridge.open', async () => {
       await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
     }),
-    vscode.commands.registerCommand('copilotBridge.ping', () => runPing(context, output)),
+    vscode.commands.registerCommand('copilotBridge.ping', () => runPing(context, log)),
   );
 }
 
@@ -38,33 +44,33 @@ export function deactivate(): void {
 }
 
 /**
- * Connectivity check. Kept from M1 — it is the fastest way to tell whether a
- * problem is "no Copilot model" versus "our code".
+ * Connectivity check: the fastest way to tell whether a problem is
+ * "no Copilot model" versus "our code".
  *
  * `sendRequest` may only run in response to a user action, so this is wired to a
  * command rather than to activation.
  */
 async function runPing(
   context: vscode.ExtensionContext,
-  output: vscode.OutputChannel,
+  log: vscode.OutputChannel,
 ): Promise<void> {
-  output.show(true);
-  output.appendLine('');
-  output.appendLine('[ping] ── connectivity check ──────────────────────────');
+  log.show(true);
+  log.appendLine('');
+  log.appendLine('[ping] -- connectivity check --------------------------');
 
   const models = await selectCopilotModels();
   if (models.length === 0) {
-    output.appendLine('[ping] ✗ selectChatModels({ vendor: "copilot" }) returned no models.');
-    output.appendLine('[ping]   请确认:已登录 GitHub Copilot,且账号已分配 Copilot 席位。');
+    log.appendLine('[ping] FAIL: selectChatModels({ vendor: "copilot" }) returned no models.');
+    log.appendLine('[ping]       Sign in to GitHub Copilot and confirm the account has a seat.');
     void vscode.window.showErrorMessage(
-      'Copilot Bridge: 未找到 Copilot 模型。请先登录 GitHub Copilot 并确认账号有席位。',
+      'Copilot Bridge: no Copilot model found. Sign in to GitHub Copilot and confirm your account has a seat.',
     );
     return;
   }
 
-  output.appendLine(`[ping] ✓ found ${models.length} model(s):`);
+  log.appendLine(`[ping] found ${models.length} model(s):`);
   for (const model of models) {
-    output.appendLine(`[ping]   - ${describeModel(model)}`);
+    log.appendLine(`[ping]   - ${describeModel(model)}`);
   }
 
   const model = models[0];
@@ -73,10 +79,10 @@ async function runPing(
   }
 
   const canSend = context.languageModelAccessInformation.canSendRequest(model);
-  output.appendLine(`[ping] canSendRequest=${String(canSend)}`);
+  log.appendLine(`[ping] canSendRequest=${String(canSend)}`);
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Copilot Bridge: pinging model…' },
+    { location: vscode.ProgressLocation.Notification, title: 'Copilot Bridge: pinging model...' },
     async () => {
       try {
         const response = await model.sendRequest(
@@ -84,27 +90,27 @@ async function runPing(
           { justification: 'Copilot Bridge connectivity check' },
         );
 
-        output.append('[ping] stream: ');
+        log.append('[ping] stream: ');
         let text = '';
         for await (const part of response.stream) {
           if (part instanceof vscode.LanguageModelTextPart) {
             text += part.value;
-            output.append(part.value);
+            log.append(part.value);
           } else if (part instanceof vscode.LanguageModelToolCallPart) {
-            output.append(`<tool-call:${part.name}>`);
+            log.append(`<tool-call:${part.name}>`);
           }
         }
-        output.appendLine('');
-        output.appendLine(
+        log.appendLine('');
+        log.appendLine(
           text.trim().length > 0
-            ? '[ping] ✓ streaming OK.'
-            : '[ping] ⚠ stream completed but produced no text.',
+            ? '[ping] OK: streaming works.'
+            : '[ping] WARN: stream completed but produced no text.',
         );
       } catch (err) {
         const failure = toModelFailure(err);
-        output.appendLine(`[ping] ✗ ${failure.code}: ${failure.message}`);
+        log.appendLine(`[ping] FAIL: ${failure.code}: ${failure.message}`);
         if (failure.cause) {
-          output.appendLine(`[ping]   cause: ${failure.cause}`);
+          log.appendLine(`[ping]       cause: ${failure.cause}`);
         }
         void vscode.window.showErrorMessage(`Copilot Bridge: ${explainFailure(failure)}`);
       }

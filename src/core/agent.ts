@@ -29,7 +29,7 @@ export async function runTurn(req: TurnRequest): Promise<void> {
   try {
     const response = await model.sendRequest(
       messages,
-      { justification: 'Copilot Bridge — 结合当前工作区回答用户问题。' },
+      { justification: 'Copilot Bridge — answer the user using the current workspace.' },
       token,
     );
 

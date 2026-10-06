@@ -14,15 +14,46 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
   "contributes": {
     "commands": [
       {
+        "command": "copilotBridge.open",
+        "title": "打开助手面板",
+        "category": "Copilot Bridge"
+      },
+      {
         "command": "copilotBridge.ping",
-        "title": "Copilot Bridge: Ping model",
+        "title": "Ping model",
         "category": "Copilot Bridge"
       }
-    ]
+    ],
+    "chatParticipants": [
+      {
+        "id": "copilotBridge.assistant",
+        "name": "bridge",
+        "fullName": "Copilot Bridge",
+        "description": "个人 AI 助手,由 GitHub Copilot 模型驱动",
+        "isSticky": true
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilotBridge",
+          "title": "Copilot Bridge",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilotBridge": [
+        {
+          "type": "webview",
+          "id": "copilotBridge.panel",
+          "name": "Assistant"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",
@@ -33,7 +64,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "@types/vscode": "^1.133.0",
+    "@types/vscode": "~1.134.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.0"
   }

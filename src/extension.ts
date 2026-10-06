@@ -1,32 +1,34 @@
 import * as vscode from 'vscode';
+import { registerChatParticipant } from './adapters/chatParticipant';
+import { ChatWebviewProvider, VIEW_ID } from './adapters/webviewView';
 import {
   describeModel,
   explainFailure,
+  registerModelTracking,
   selectCopilotModels,
   toModelFailure,
 } from './core/model';
 
 const OUTPUT_CHANNEL_NAME = 'Copilot Bridge';
 
-/**
- * M1: prove that `vscode.lm` can reach a Copilot-backed model end-to-end.
- *
- * This milestone intentionally has no UI and no tools. It verifies the three
- * preconditions everything else depends on:
- *   1. `selectChatModels({ vendor: 'copilot' })` returns a model
- *   2. the user consent dialog can be satisfied
- *   3. streaming responses work
- *
- * `sendRequest` may only run in response to a user action, so this is wired to a
- * command rather than to activation.
- */
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   context.subscriptions.push(output);
-
   output.appendLine(`[activate] Copilot Bridge on VS Code ${vscode.version}`);
 
+  registerModelTracking(context);
+
+  // Entry point 1: `@bridge` inside the existing Copilot Chat panel.
+  registerChatParticipant(context);
+
+  // Entry point 2: standalone sidebar panel.
+  const provider = new ChatWebviewProvider(context);
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(VIEW_ID, provider));
+
   context.subscriptions.push(
+    vscode.commands.registerCommand('copilotBridge.open', async () => {
+      await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+    }),
     vscode.commands.registerCommand('copilotBridge.ping', () => runPing(context, output)),
   );
 }
@@ -35,6 +37,13 @@ export function deactivate(): void {
   // All resources are held in context.subscriptions.
 }
 
+/**
+ * Connectivity check. Kept from M1 — it is the fastest way to tell whether a
+ * problem is "no Copilot model" versus "our code".
+ *
+ * `sendRequest` may only run in response to a user action, so this is wired to a
+ * command rather than to activation.
+ */
 async function runPing(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
@@ -63,7 +72,6 @@ async function runPing(
     return;
   }
 
-  // Precheck consent without triggering the dialog (undefined == not yet asked).
   const canSend = context.languageModelAccessInformation.canSendRequest(model);
   output.appendLine(`[ping] canSendRequest=${String(canSend)}`);
 
@@ -89,7 +97,7 @@ async function runPing(
         output.appendLine('');
         output.appendLine(
           text.trim().length > 0
-            ? '[ping] ✓ streaming OK — M1 verified, Copilot model access works.'
+            ? '[ping] ✓ streaming OK.'
             : '[ping] ⚠ stream completed but produced no text.',
         );
       } catch (err) {

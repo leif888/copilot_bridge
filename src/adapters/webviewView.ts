@@ -13,15 +13,21 @@ import type { AgentSink } from './sink';
 
 export const VIEW_ID = 'copilotBridge.panel';
 
+/** Assets the panel needs, relative to the extension root. */
+const REQUIRED_ASSETS = ['dist/webview.js', 'dist/webview.css'] as const;
+
 /**
  * Standalone assistant panel.
  *
- * Two VS Code behaviours shape this class:
+ * Three VS Code behaviours shape this class:
  *
  * 1. A sidebar webview view is **disposed every time it is hidden**. So the
  *    render transcript is kept here and replayed on `ready`, otherwise the
  *    conversation would vanish whenever the user glances at another view.
  * 2. Disposal must **not** cancel the in-flight turn, for the same reason.
+ * 3. The webview bundle is a build artifact and is not committed. If it is
+ *    missing the panel degrades to static HTML with no way to report anything,
+ *    so the assets are checked up front and a fix is shown in the panel itself.
  */
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -42,11 +48,26 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
     };
-    view.webview.html = this.renderHtml(view.webview);
 
-    // If the webview bundle is missing from disk the panel silently degrades to
-    // static HTML, which looks like "nothing works". Check and say so.
-    void this.checkAssets();
+    view.onDidDispose(() => {
+      this.log.appendLine('[panel] view disposed (hidden or closed) — turn keeps running');
+      this.view = undefined;
+    });
+
+    void this.initialize(view);
+  }
+
+  private async initialize(view: vscode.WebviewView): Promise<void> {
+    const missing = await this.findMissingAssets();
+
+    if (missing.length > 0) {
+      this.log.appendLine(`[panel] MISSING BUILD OUTPUT: ${missing.join(', ')}`);
+      this.log.appendLine('[panel] run `npm run build` in the extension folder, then reload');
+      view.webview.html = this.renderMissingAssetsHtml(view.webview, missing);
+      return;
+    }
+
+    view.webview.html = this.renderHtml(view.webview);
 
     view.webview.onDidReceiveMessage((raw: unknown) => {
       if (!isWebviewToHost(raw)) {
@@ -56,23 +77,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.log.appendLine(`[panel] <- ${raw.t}`);
       void this.handle(raw);
     });
-
-    view.onDidDispose(() => {
-      this.log.appendLine('[panel] view disposed (hidden or closed) — turn keeps running');
-      this.view = undefined;
-    });
   }
 
-  private async checkAssets(): Promise<void> {
-    for (const name of ['webview.js', 'webview.css']) {
-      const uri = vscode.Uri.joinPath(this.context.extensionUri, 'dist', name);
+  private async findMissingAssets(): Promise<string[]> {
+    const missing: string[] = [];
+    for (const relative of REQUIRED_ASSETS) {
+      const uri = vscode.Uri.joinPath(this.context.extensionUri, relative);
       try {
-        const stat = await vscode.workspace.fs.stat(uri);
-        this.log.appendLine(`[panel] asset ${name} present (${stat.size} bytes)`);
+        await vscode.workspace.fs.stat(uri);
       } catch {
-        this.log.appendLine(`[panel] ASSET MISSING: ${uri.fsPath} — the build did not run`);
+        missing.push(relative);
       }
     }
+    return missing;
   }
 
   private post(event: AgentEvent): void {
@@ -167,6 +184,49 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private renderCsp(webview: vscode.Webview, nonce: string): string {
+    // `default-src 'none'` plus an explicit allowlist: the panel renders model
+    // output, which is untrusted text and must never reach a remote origin.
+    return [
+      "default-src 'none'",
+      `style-src ${webview.cspSource}`,
+      `script-src 'nonce-${nonce}' ${webview.cspSource}`,
+      `font-src ${webview.cspSource}`,
+    ].join('; ');
+  }
+
+  private renderMissingAssetsHtml(webview: vscode.Webview, missing: readonly string[]): string {
+    const nonce = createNonce();
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
+    );
+    const list = missing.map((m) => `<li><code>${m}</code></li>`).join('');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${this.renderCsp(webview, nonce)}">
+  <link rel="stylesheet" href="${styleUri}">
+  <title>Copilot Bridge</title>
+</head>
+<body>
+  <main class="log">
+    <article class="msg msg-error">
+      <div class="msg-role">Build output missing</div>
+      <div class="msg-body">The extension host is running, but the panel's webview bundle was never built. Missing:
+${list}
+To fix, run in the extension folder:
+
+  npm run build
+
+then run "Developer: Reload Window".</div>
+    </article>
+  </main>
+</body>
+</html>`;
+  }
+
   private renderHtml(webview: vscode.Webview): string {
     const nonce = createNonce();
     const scriptUri = webview.asWebviewUri(
@@ -176,20 +236,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     );
 
-    // `default-src 'none'` plus an explicit allowlist: the panel renders model
-    // output, which is untrusted text and must never reach a remote origin.
-    const csp = [
-      "default-src 'none'",
-      `style-src ${webview.cspSource}`,
-      `script-src 'nonce-${nonce}' ${webview.cspSource}`,
-      `font-src ${webview.cspSource}`,
-    ].join('; ');
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="${csp}">
+  <meta http-equiv="Content-Security-Policy" content="${this.renderCsp(webview, nonce)}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
   <title>Copilot Bridge</title>
